@@ -28,6 +28,10 @@ defmodule Rwt.TipRepository do
     GenServer.call(Rwt.TipRepositoryServer, :find_tips)
   end
 
+  def find_one(id) do
+    GenServer.call(Rwt.TipRepositoryServer, {:find_tip, id})
+  end
+
   # Callbacks
 
   @impl true
@@ -39,6 +43,11 @@ defmodule Rwt.TipRepository do
   @impl true
   def handle_call(:find_tips, _from, state) do
     {:reply, state.tips, state}
+  end
+
+  @impl true
+  def handle_call({:find_tip, id}, _from, state) do
+    {:reply, Enum.find(state.tips, &(&1.id === id)), state}
   end
 
   @impl true

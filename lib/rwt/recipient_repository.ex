@@ -73,6 +73,6 @@ defmodule Rwt.RecipientRepository do
   # Private
 
   defp persistor() do
-    Process.send_after(self(), :persist, 6 * 1000)
+    Process.send_after(self(), :persist, 60 * 1000)
   end
 end

@@ -22,10 +22,12 @@ defmodule Rwt.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:quantum, "~> 3.0-rc"},
       {:jason, "~> 1.2"},
       {:distillery, "~> 2.1"},
       {:timex, "~> 3.5"},
-      {:uuid, "~> 1.1"}
+      {:uuid, "~> 1.1"},
+      {:tesla, "~> 1.3.0"}
     ]
   end
 end

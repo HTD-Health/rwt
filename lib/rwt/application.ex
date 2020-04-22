@@ -7,6 +7,7 @@ defmodule Rwt.Application do
 
   def start(_type, _args) do
     children = [
+      Rwt.Scheduler,
       {Rwt.Server, []},
       {Rwt.RecipientRepository, []},
       {Rwt.TipRepository, []}

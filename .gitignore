@@ -24,3 +24,5 @@ rwt-*.tar
 
 
 rwt_persistence
+
+.env

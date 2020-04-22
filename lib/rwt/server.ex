@@ -4,6 +4,7 @@ defmodule Rwt.Server do
   require Logger
 
   alias Rwt.RecipientRepository
+  alias Rwt.TipRepository
 
   #  %{
   #    uuid: UUID.v4()
@@ -13,7 +14,6 @@ defmodule Rwt.Server do
   #  }
 
   @state %{
-    weekdays: Enum.to_list(1..5),
     hours: %{
       start: 8,
       end: 13
@@ -49,41 +49,8 @@ defmodule Rwt.Server do
   @impl true
   def init(state) do
     persistor()
-    {:ok, state}
-  end
-
-  @impl true
-  def handle_cast(:schedule_tips, state) do
-    recipients = Rwt.RecipientRepository.find()
-    tips = Rwt.TipRepository.find()
-
-    scheduled_tips =
-      recipients
-      |> Enum.map(fn recipient -> schedule_tip_for_recipient(recipient, tips, state) end)
-      |> Enum.filter(&(&1 !== nil))
-
-    {:noreply, %{state | scheduled_tips: scheduled_tips}}
-  end
-
-  @impl true
-  def handle_cast(:send_tips, state) do
-    tips_to_send = state.scheduled_tips
-                   |> Enum.filter(&(Timex.after?(Timex.now, &1.send_time)))
-
-    Enum.each(tips_to_send, &send_tip/1)
-
-    IO.inspect(state.scheduled_tips)
-    IO.inspect(tips_to_send)
-
-    tips_to_send_uuids = Enum.map(tips_to_send, &(&1.uuid))
-
-    new_state = %{
-      state |
-      scheduled_tips: Enum.reject(state.scheduled_tips, &(Enum.member?(tips_to_send_uuids, &1.uuid))),
-      sent_tips: state.sent_tips ++ tips_to_send
-    }
-
-    {:noreply, new_state}
+    sender()
+    {:ok, Rwt.Persistence.read(:server) || state}
   end
 
   @impl true
@@ -97,39 +64,86 @@ defmodule Rwt.Server do
   end
 
   @impl true
+  def handle_info(:send_tips, state) do
+    state = send_tips(state)
+    sender()
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast(:schedule_tips, state) do
+    state = schedule_tips(state)
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info(:persist, state) do
     Rwt.Persistence.save(:server, state)
     persistor()
     {:noreply, state}
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    Rwt.Persistence.save(:server, state)
+  end
+
   # Private
+
+  defp schedule_tips(state) do
+    recipients = Rwt.RecipientRepository.find()
+    tips = Rwt.TipRepository.find()
+
+    scheduled_tips =
+      recipients
+      |> Enum.map(fn recipient -> schedule_tip_for_recipient(recipient, tips, state) end)
+      |> Enum.filter(&(&1 !== nil))
+
+    %{state | scheduled_tips: scheduled_tips}
+  end
 
   defp schedule_tip_for_recipient(recipient, tips, state) do
     already_sent_tips =
       state.sent_tips
       |> Enum.filter(
-           &(&1.recipient_id === recipient.id && Timex.diff(Timex.now(), &1.send_time, :days) < 14)
-         )
+        &(&1.recipient_id === recipient.id && Timex.diff(Timex.now(), &1.send_time, :days) < 14)
+      )
 
     tips
     |> Enum.shuffle()
     |> Enum.reduce(
-         nil,
-         fn tip, scheduled_tip ->
-           with nil <- Enum.find(already_sent_tips, &(&1.tip_id === tip.id)),
-                nil <- scheduled_tip do
-             %{
-               uuid: UUID.uuid4(),
-               tip_id: tip.id,
-               recipient_id: recipient.id,
-               send_time: randomize_hour(state.hours.start, state.hours.end)
-             }
-           else
-             _ -> scheduled_tip
-           end
-         end
-       )
+      nil,
+      fn tip, scheduled_tip ->
+        with nil <- Enum.find(already_sent_tips, &(&1.tip_id === tip.id)),
+             nil <- scheduled_tip do
+          %{
+            uuid: UUID.uuid4(),
+            tip_id: tip.id,
+            recipient_id: recipient.id,
+            send_time: randomize_hour(state.hours.start, state.hours.end)
+          }
+        else
+          _ -> scheduled_tip
+        end
+      end
+    )
+  end
+
+  defp send_tips(state) do
+    tips_to_send =
+      state.scheduled_tips
+      |> Enum.filter(&Timex.after?(Timex.now(), &1.send_time))
+
+    Enum.each(tips_to_send, &send_tip_message/1)
+
+    tips_to_send_uuids = Enum.map(tips_to_send, & &1.uuid)
+
+    new_state = %{
+      state
+    | scheduled_tips:
+        Enum.reject(state.scheduled_tips, &Enum.member?(tips_to_send_uuids, &1.uuid)),
+      sent_tips: state.sent_tips ++ tips_to_send
+    }
   end
 
   defp randomize_hour(from, to) do
@@ -140,13 +154,25 @@ defmodule Rwt.Server do
     |> Timex.shift(minutes: random_offset)
   end
 
-  defp send_tip(tip) do
-    IO.inspect(tip, label: :send)
-    # TODO: implement me
+  defp send_tip_message(tip) do
+    Tesla.post(
+      "https://slack.com/api/chat.postMessage",
+      Jason.encode!(%{
+        channel: tip.recipient_id,
+        text: Rwt.TipRepository.find_one(tip.tip_id).content
+      }),
+      headers: [
+        {"Authorization", "Bearer #{Application.get_env(:rwt, :slack_bot_token)}"},
+        {"content-type", "application/json"}
+      ]
+    )
+  end
+
+  defp sender() do
+    Process.send_after(self(), :send_tips, 60 * 1000)
   end
 
   defp persistor() do
-    IO.inspect(:hehe)
-    Process.send_after(self(), :persist, 6 * 1000)
+    Process.send_after(self(), :persist, 60 * 1000)
   end
 end
