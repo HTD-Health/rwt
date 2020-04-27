@@ -106,27 +106,27 @@ defmodule Rwt.Server do
     already_sent_tips =
       state.sent_tips
       |> Enum.filter(
-        &(&1.recipient_id === recipient.id && Timex.diff(Timex.now(), &1.send_time, :days) < 14)
-      )
+           &(&1.recipient_id === recipient.id && Timex.diff(Timex.now(), &1.send_time, :days) < 14)
+         )
 
     tips
     |> Enum.shuffle()
     |> Enum.reduce(
-      nil,
-      fn tip, scheduled_tip ->
-        with nil <- Enum.find(already_sent_tips, &(&1.tip_id === tip.id)),
-             nil <- scheduled_tip do
-          %{
-            uuid: UUID.uuid4(),
-            tip_id: tip.id,
-            recipient_id: recipient.id,
-            send_time: randomize_hour(state.hours.start, state.hours.end)
-          }
-        else
-          _ -> scheduled_tip
-        end
-      end
-    )
+         nil,
+         fn tip, scheduled_tip ->
+           with nil <- Enum.find(already_sent_tips, &(&1.tip_id === tip.id)),
+                nil <- scheduled_tip do
+             %{
+               uuid: UUID.uuid4(),
+               tip_id: tip.id,
+               recipient_id: recipient.id,
+               send_time: randomize_hour(state.hours.start, state.hours.end)
+             }
+           else
+             _ -> scheduled_tip
+           end
+         end
+       )
   end
 
   defp send_tips(state) do
@@ -140,7 +140,8 @@ defmodule Rwt.Server do
 
     new_state = %{
       state
-    | scheduled_tips:
+    |
+      scheduled_tips:
         Enum.reject(state.scheduled_tips, &Enum.member?(tips_to_send_uuids, &1.uuid)),
       sent_tips: state.sent_tips ++ tips_to_send
     }
@@ -157,15 +158,29 @@ defmodule Rwt.Server do
   defp send_tip_message(tip) do
     Tesla.post(
       "https://slack.com/api/chat.postMessage",
-      Jason.encode!(%{
-        channel: tip.recipient_id,
-        text: Rwt.TipRepository.find_one(tip.tip_id).content
-      }),
+      Jason.encode!(
+        %{
+          channel: tip.recipient_id,
+          text: "#{draw_greeting()}\n*#{Rwt.TipRepository.find_one(tip.tip_id).content}*"
+        }
+      ),
       headers: [
         {"Authorization", "Bearer #{Application.get_env(:rwt, :slack_bot_token)}"},
         {"content-type", "application/json"}
       ]
     )
+  end
+
+  defp draw_greeting() do
+    [greeting | _] = Enum.shuffle([
+      "Tip na dziś:",
+      "Wujek bot radzi:",
+      "Dzisiejsza zdalna porada:",
+      "Darz bór, dzisiaj radzę:",
+      "Wskazówka:",
+      "Posłuchaj mojej rady:"
+    ])
+    greeting
   end
 
   defp sender() do
